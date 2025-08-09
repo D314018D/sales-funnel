@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive SVG Sales Funnel</title>
+  <style>
+    :root {
+      --bg:#0f172a;        /* slate-900 */
+      --card:#111827;      /* gray-900 */
+      --text:#e5e7eb;      /* gray-200 */
+      --muted:#9ca3af;     /* gray-400 */
+      --brand:#60a5fa;     /* blue-400 */
+      --brand-2:#34d399;   /* emerald-400 */
+      --brand-3:#f59e0b;   /* amber-500 */
+      --brand-4:#f43f5e;   /* rose-500 */
+      --stroke: #1f2937;   /* gray-800 */
+      --tooltip-bg:#111827ee;
+    }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 10% -20%, #1f2937 0, #0f172a 60%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 24px auto;
+      padding: 16px;
+    }
+    h1 {
+      font-size: clamp(18px, 3vw, 28px);
+      margin: 0 0 8px 0;
+      letter-spacing: .2px;
+    }
+    p.desc{ color:var(--muted); margin:0 0 18px }
+    .card {
+      background: linear-gradient(180deg, #0b1220, #0a1020);
+      border: 1px solid var(--stroke);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 10px 25px rgba(0,0,0,.35);
+    }
+    svg{ width:100%; height:auto; display:block }
+    .stage { cursor: pointer; transition: transform .18s ease; }
+    .stage:hover { filter: brightness(1.15); transform: translateY(-2px); }
+    .label{ font-weight:600; font-size:14px; fill:#f8fafc }
+    .sub{ font-weight:400; font-size:12px; fill:#d1d5db }
+    .kpi{ font-weight:700; font-size:12px; fill:#ffffff }
+    .grid line { stroke: #374151; stroke-width: 0.6; opacity:.4 }
+    .tooltip {
+      position: fixed;
+      padding: 10px 12px;
+      font-size: 12px;
+      background: var(--tooltip-bg);
+      color: #f8fafc;
+      border: 1px solid var(--stroke);
+      border-radius: 10px;
+      pointer-events: none;
+      transform: translate(-50%, calc(-100% - 10px));
+      white-space: nowrap;
+      box-shadow: 0 8px 20px rgba(0,0,0,.35);
+      display:none;
+    }
+    .legend{ display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; font-size:12px; color:var(--muted) }
+    .dot{ width:10px; height:10px; border-radius:3px; display:inline-block; margin-right:6px }
+    .note{ color:var(--muted); font-size:12px; margin-top:8px }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Interactive Sales Funnel (SVG + JS)</h1>
+    <p class="desc">Hover stages to see the percentage drop from the previous step. Resize the window—everything stays responsive.</p>
+
+    <div class="card">
+      <svg viewBox="0 0 1000 540" role="img" aria-labelledby="title desc">
+        <title id="title">Interactive Sales Funnel</title>
+        <desc id="desc">Four-stage funnel showing counts for Awareness, Interest, Consideration, and Conversion.</desc>
+
+        <!-- background grid for subtle scale -->
+        <g class="grid">
+          <!-- verticals -->
+          <line x1="100" y1="40" x2="100" y2="500"/>
+          <line x1="250" y1="40" x2="250" y2="500"/>
+          <line x1="400" y1="40" x2="400" y2="500"/>
+          <line x1="550" y1="40" x2="550" y2="500"/>
+          <line x1="700" y1="40" x2="700" y2="500"/>
+          <line x1="850" y1="40" x2="850" y2="500"/>
+          <!-- horizontals -->
+          <line x1="80" y1="140" x2="920" y2="140"/>
+          <line x1="80" y1="240" x2="920" y2="240"/>
+          <line x1="80" y1="340" x2="920" y2="340"/>
+          <line x1="80" y1="440" x2="920" y2="440"/>
+        </g>
+
+        <!-- Funnel geometry generated to fit widths -->
+        <g id="funnel"></g>
+
+        <!-- labels drawn on top-->
+        <g id="labels"></g>
+      </svg>
+
+      <div class="legend" id="legend"></div>
+      <div class="note">Data is editable inside the file. Colors and geometry are pure SVG; no external libraries.</div>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+
+  <script>
+    // ==== Editable data ====
+    const stages = [
+      { name: "Awareness",    value: 10000, unit: "visitors",   color: getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() },
+      { name: "Interest",     value: 3000,  unit: "clicks",     color: getComputedStyle(document.documentElement).getPropertyValue('--brand-2').trim() },
+      { name: "Consideration",value: 800,   unit: "signups",    color: getComputedStyle(document.documentElement).getPropertyValue('--brand-3').trim() },
+      { name: "Conversion",   value: 150,   unit: "customers",  color: getComputedStyle(document.documentElement).getPropertyValue('--brand-4').trim() },
+    ];
+
+    // ==== Layout constants ====
+    const svg = document.querySelector('svg');
+    const g = document.getElementById('funnel');
+    const labels = document.getElementById('labels');
+    const legend = document.getElementById('legend');
+    const tooltip = document.getElementById('tooltip');
+
+    const left = 120, right = 880;
+    const topY = 80;
+    const rowH = 90;
+    const gap = 14;
+    const corner = 10; // rounded corner radius
+
+    // compute relative widths based on values (top is 100%)
+    const max = stages[0].value;
+    const widths = stages.map(s => (s.value / max) * (right-left));
+
+    function trapezoidPath(xCenter, fullWidth, nextWidth, y, h, r){
+      // Build a rounded trapezoid from width fullWidth (top) to nextWidth (bottom).
+      const halfTop = fullWidth/2;
+      const halfBot = (nextWidth!==undefined ? nextWidth : fullWidth)/2;
+      const x1 = xCenter - halfTop, x2 = xCenter + halfTop;
+      const x3 = xCenter - halfBot, x4 = xCenter + halfBot;
+      const y1 = y, y2 = y + h;
+      const rr = Math.min(r, h/2, (x2-x1)/2, (x4-x3)/2);
+      // Rounded path (top-left -> top-right -> bottom-right -> bottom-left)
+      return `M ${x1+rr},${y1}
+              H ${x2-rr} Q ${x2},${y1} ${x2},${y1+rr}
+              L ${x4},${y2-rr} Q ${x4},${y2} ${x4-rr},${y2}
+              H ${x3+rr} Q ${x3},${y2} ${x3},${y2-rr}
+              L ${x1},${y1+rr} Q ${x1},${y1} ${x1+rr},${y1} Z`;
+    }
+
+    // draw funnel sections
+    g.innerHTML = "";
+    labels.innerHTML = "";
+    legend.innerHTML = "";
+
+    const centerX = (left + right) / 2;
+
+    stages.forEach((s, i) => {
+      const topW  = widths[i];
+      const botW  = widths[i+1] ?? topW * 0.92; // slight taper on last
+      const y = topY + i * (rowH + gap);
+      const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+      p.setAttribute("d", trapezoidPath(centerX, topW, botW, y, rowH, corner));
+      p.setAttribute("fill", s.color);
+      p.setAttribute("class", "stage");
+      p.dataset.index = i;
+      g.appendChild(p);
+
+      // Labels
+      const labelX = centerX - topW/2 + 18;
+      const labelY = y + rowH/2 - 6;
+      const kpiY   = labelY + 18;
+
+      const text1 = document.createElementNS("http://www.w3.org/2000/svg","text");
+      text1.setAttribute("x", labelX);
+      text1.setAttribute("y", labelY);
+      text1.setAttribute("class", "label");
+      text1.textContent = s.name;
+      labels.appendChild(text1);
+
+      const text2 = document.createElementNS("http://www.w3.org/2000/svg","text");
+      text2.setAttribute("x", labelX);
+      text2.setAttribute("y", kpiY);
+      text2.setAttribute("class", "sub");
+      text2.textContent = `${s.value.toLocaleString()} ${s.unit}`;
+      labels.appendChild(text2);
+
+      const rate = i===0 ? 0 : (1 - (s.value / stages[i-1].value));
+      const kpi  = document.createElementNS("http://www.w3.org/2000/svg","text");
+      kpi.setAttribute("x", centerX + topW/2 - 18);
+      kpi.setAttribute("y", kpiY);
+      kpi.setAttribute("text-anchor","end");
+      kpi.setAttribute("class", "kpi");
+      kpi.textContent = i===0 ? "—" : `−${(rate*100).toFixed(1)}%`;
+      labels.appendChild(kpi);
+
+      // Legend
+      const item = document.createElement('div');
+      const swatch = document.createElement('span');
+      swatch.className = 'dot';
+      swatch.style.background = s.color;
+      const txt = document.createElement('span');
+      txt.textContent = `${s.name}`;
+      item.appendChild(swatch);
+      item.appendChild(txt);
+      legend.appendChild(item);
+    });
+
+    // Hover interaction: show tooltip with drop from previous stage
+    svg.addEventListener('mousemove', (e) => {
+      const t = e.target;
+      if(!t.classList.contains('stage')) { tooltip.style.display='none'; return; }
+      const i = +t.dataset.index;
+      let html = `<strong>${stages[i].name}</strong><br/>${stages[i].value.toLocaleString()} ${stages[i].unit}`;
+      if(i>0){
+        const drop = 1 - (stages[i].value / stages[i-1].value);
+        html += `<br/><span style="color:#93c5fd">Drop from prev:</span> ${(drop*100).toFixed(1)}%`;
+      }
+      tooltip.innerHTML = html;
+      tooltip.style.display = 'block';
+      tooltip.style.left = e.clientX + 'px';
+      tooltip.style.top  = e.clientY + 'px';
+    });
+    svg.addEventListener('mouseleave', () => tooltip.style.display='none');
+  </script>
+</body>
+</html>
